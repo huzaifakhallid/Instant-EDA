@@ -62,3 +62,13 @@ def create_barplot(df: pd.DataFrame, column: str) -> Figure:
     fig = px.bar(value_counts, x=column, y='Count', title=plot_title, template="plotly_white")
 
     return fig
+
+def create_correlation_heatmap(df: pd.DataFrame) -> Figure:
+    numerical_df = df.select_dtypes(include = ['int64', 'float64'])
+    correlation_matrix = numerical_df.corr()
+
+    fig = px.imshow(correlation_matrix, text_auto=True, aspect="auto", title="Correlation Matrix", template="plotly_white")
+
+    fig.update_layout(title_x=0.5)
+    
+    return fig
