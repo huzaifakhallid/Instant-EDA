@@ -1,4 +1,6 @@
 import pandas as pd
+import plotly.express as px
+from plotly.graph_objects import Figure
 
 # This function takes a DataFrame and returns a dictionary with profiling information
 def profile_data(df: pd.DataFrame) -> dict:
@@ -37,3 +39,26 @@ def analyzecolumns(df: pd.DataFrame) -> pd.DataFrame:
 
     return summary_df
 
+# This function creates a histogram for a specified column in the DataFrame
+def create_histogram(df: pd.DataFrame, column: str) -> Figure:
+    fig = px.histogram(df, x=column, title = f"Histogram of {column}", template = "plotly_white")
+
+    return fig
+
+# This function creates a bar plot for the frequency of categories in a specified column
+def create_barplot(df: pd.DataFrame, column: str) -> Figure:
+    value_counts = df[column].value_counts().reset_index()
+    value_counts.columns = [column, 'Count']
+
+    value_counts = value_counts.sort_values(by='Count', ascending=False)
+
+    if len(value_counts) > 20:
+        value_counts = value_counts.head(20)
+        plot_title = f"Top 20 Most Frequent Categories in {column}"
+
+    else:
+        plot_title = f"Frequency of Categories in {column}"
+
+    fig = px.bar(value_counts, x=column, y='Count', title=plot_title, template="plotly_white")
+
+    return fig
