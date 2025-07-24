@@ -5,7 +5,8 @@ from core.analyzer import (
     analyze_columns, 
     create_histogram, 
     create_barplot,
-    create_correlation_heatmap
+    create_correlation_heatmap,
+    get_health_report
 )
 
 # --- Page Configuration ---
@@ -42,6 +43,21 @@ if uploaded_file is not None:
         
         # --- TAB 1: Data Overview ---
         with tab1:
+            st.header("Data Health Report")
+            health_report = get_health_report(df)
+
+            if health_report["high_missing_values"]:
+                st.warning(f"**High Missing Values:** The following columns have over 50% missing data: {', '.join(health_report['high_missing_values'])}")
+            
+            if health_report["constant_columns"]:
+                st.warning(f"**Constant Columns:** The following columns have only one unique value and provide no information: {', '.join(health_report['constant_columns'])}")
+
+            if health_report["high_cardinality_columns"]:
+                st.info(f"**High Cardinality:** The following columns have a high number of unique values (potential IDs): {', '.join(health_report['high_cardinality_columns'])}")
+            
+            st.markdown("---")
+
+
             st.header("Data Preview")
             st.dataframe(df.head())
             

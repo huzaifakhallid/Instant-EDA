@@ -73,3 +73,26 @@ def create_correlation_heatmap(df: pd.DataFrame) -> Figure:
     fig.update_layout(title_x=0.5)
 
     return fig
+
+# This function generates a health report for the DataFrame, identifying columns with high missing values, constant columns, and high cardinality columns
+def get_health_report(df: pd.DataFrame) -> dict:
+    report = {"high_missing_values": [], "constant_columns": [], "high_cardinality_columns": []}
+
+    total_rows = len(df)
+
+    for col in df.columns:
+        missing_percentage = (df[col].isnull().sum() / total_rows) * 100 
+        if missing_percentage > 50:
+            report["high_missing_values"].append((col, f"{missing_percentage:.2f}%"))
+
+        unique_values_count = df[col].nunique()
+        if unique_values_count == 1:
+            report["constant_columns"].append(f"'{col}'")
+
+
+        cardinality_ratio = unique_values_count / total_rows
+        if cardinality_ratio > 0.95 and unique_values_count > 1:
+            report["high_cardinality_columns"].append(f"'{col}' ({unique_values_count} unique)")
+
+
+    return report
