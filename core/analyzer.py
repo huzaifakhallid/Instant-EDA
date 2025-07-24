@@ -5,21 +5,21 @@ from plotly.graph_objects import Figure
 # This function takes a DataFrame and returns a dictionary with profiling information
 def profile_data(df: pd.DataFrame) -> dict:
     rows =  df.shape[0]
-    columns = df.shape[1]
+    cols = df.shape[1]
 
     missing_cells = df.isnull().sum().sum()
-    total_cells = rows * columns
+    total_cells = rows * cols
     missing_percentage = (missing_cells/total_cells)*100 if total_cells > 0 else 0
 
     duplicate_rows = df.duplicated().sum()
     duplicate_percentage = (duplicate_rows/rows)*100 if rows > 0 else 0
 
-    profile = {"NUmber Of ROws: ": rows, "Number Of Columns: ": columns, "Total Missing Cells:": missing_cells, "Total Cells: ": total_cells, "Missing Percentage: ": missing_percentage, "Duplicate Rows: ": duplicate_rows, "Duplicate Percentage: ": duplicate_percentage}
+    profile = {"Number of Rows": rows, "Number of Columns": cols, "Total Missing Cells": f"{missing_cells} ({missing_percentage:.2f}%)", "Total Duplicate Rows": f"{duplicate_rows} ({duplicate_percentage:.2f}%)"}
 
     return profile
 
 # This function analyzes each column in the DataFrame and returns a summary DataFrame
-def analyzecolumns(df: pd.DataFrame) -> pd.DataFrame:
+def analyze_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_analysis = []
 
     for col in df.columns:
@@ -30,7 +30,7 @@ def analyzecolumns(df: pd.DataFrame) -> pd.DataFrame:
 
     unique_values = df[col].nunique()
 
-    col_summary = {"Column Name": col, "Data Type": dtype, "Missing Values": missing_values, "Missing Percentage": missing_percentage, "Unique Values": unique_values}
+    col_summary = { "Column Name": col, "Data Type": dtype, "Missing Values (%)": f"{missing_percentage:.2f}","Unique Values": unique_values }
 
     col_analysis.append(col_summary)
     summary_df = pd.DataFrame(col_analysis)
@@ -63,6 +63,7 @@ def create_barplot(df: pd.DataFrame, column: str) -> Figure:
 
     return fig
 
+# This function creates a correlation heatmap for the numerical columns in the DataFrame
 def create_correlation_heatmap(df: pd.DataFrame) -> Figure:
     numerical_df = df.select_dtypes(include = ['int64', 'float64'])
     correlation_matrix = numerical_df.corr()
@@ -70,5 +71,5 @@ def create_correlation_heatmap(df: pd.DataFrame) -> Figure:
     fig = px.imshow(correlation_matrix, text_auto=True, aspect="auto", title="Correlation Matrix", template="plotly_white")
 
     fig.update_layout(title_x=0.5)
-    
+
     return fig
