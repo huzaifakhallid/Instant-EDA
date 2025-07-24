@@ -96,3 +96,145 @@ def get_health_report(df: pd.DataFrame) -> dict:
 
 
     return report
+
+
+def get_ml_suggestions(df: pd.DataFrame) -> dict:
+
+    suggestions = {}
+    total_rows = len(df)
+    
+    for col in df.columns:
+        col_suggestions = {
+            "Role": "Unknown",
+            "Suggestion": "No specific suggestion.",
+            "Code": "# No code snippet available."
+        }
+        
+        # --- Heuristics for Role Identification ---
+        nunique = df[col].nunique()
+        dtype = df[col].dtype
+        
+        # 1. ID Column Heuristic
+        if nunique == total_rows or (nunique / total_rows > 0.95 and pd.api.types.is_string_dtype(dtype)):
+            col_suggestions["role"] = "Identifier"
+            col_suggestions["suggestion"] = "This column has a unique value for almost every row. It's likely an ID and should probably be dropped for most models."
+            col_suggestions["code"] = f"df_processed = df.drop(columns=['{col}'])"
+        
+        # 2. Categorical Column Heuristics
+        elif pd.api.types.is_object_dtype(dtype) or pd.api.types.is_categorical_dtype(dtype) or (pd.api.types.is_integer_dtype(dtype) and nunique < 25):
+            if nunique == 2:
+                col_suggestions["role"] = "Binary Categorical"
+                col_suggestions["suggestion"] = "This is a binary column. Use Label Encoding or One-Hot Encoding."
+                col_suggestions["code"] = (
+                    f"# Using scikit-learn's LabelEncoder\n"
+                    f"from sklearn.preprocessing import LabelEncoder\n"
+                    f"le = LabelEncoder()\n"
+                    f"df_processed['{col}'] = le.fit_transform(df['{col}'])"
+                )
+            else:
+                col_suggestions["role"] = "Low-Cardinality Categorical"
+                col_suggestions["suggestion"] = "This is a categorical column with a manageable number of unique values. Use One-Hot Encoding."
+                col_suggestions["code"] = (
+                    f"# Using pandas get_dummies for One-Hot Encoding\n"
+                    f"df_processed = pd.get_dummies(df, columns=['{col}'], prefix='{col}')"
+                )
+
+        # 3. Numerical Column Heuristics
+        elif pd.api.types.is_numeric_dtype(dtype):
+            col_suggestions["role"] = "Numerical"
+            skewness = df[col].skew()
+            if abs(skewness) > 1.5:
+                col_suggestions["suggestion"] = (
+                    f"This is a numerical feature. It is highly skewed (skewness = {skewness:.2f}). "
+                    f"Consider applying a log or Box-Cox transformation to make its distribution more normal."
+                )
+                col_suggestions["code"] = (
+                    f"# Using numpy for log transformation (add 1 to handle zeros)\n"
+                    f"import numpy as np\n"
+                    f"df_processed['{col}_log'] = np.log1p(df['{col}'])"
+                )
+            else:
+                col_suggestions["suggestion"] = "This is a numerical feature. Standard Scaling (Z-score normalization) is a good default for many algorithms."
+                col_suggestions["code"] = (
+                    f"# Using scikit-learn's StandardScaler\n"
+                    f"from sklearn.preprocessing import StandardScaler\n"
+                    f"scaler = StandardScaler()\n"
+                    f"df_processed[['{col}']] = scaler.fit_transform(df[['{col}'])"
+                )
+        
+        # 4. Datetime Heuristic
+        elif pd.api.types.is_datetime64_any_dtype(dtype):
+             col_suggestions["role"] = "Datetime"
+             col_suggestions["suggestion"] = "This is a datetime column. Extract useful features like year, month, day of week, etc."
+             col_suggestions["code"] = (
+                f"# Convert to datetime if not already\n"
+                f"df['{col}'] = pd.to_datetime(df['{col}'])\n\n"
+                f"# Feature Extraction Examples\n"
+                f"df_processed['{col}_year'] = df['{col}'].dt.year\n"
+                f"df_processed['{col}_month'] = df['{col}'].dt.month\n"
+                f"df_processed['{col}_dayofweek'] = df['{col}'].dt.dayofweek"
+             )
+
+        suggestions[col] = col_suggestions
+        
+    return suggestions
+
+# This function detects outliers in numerical columns of a DataFrame using the IQR method
+def detect_outliers(df: pd.DataFrame) -> dict:
+    outlier_report = {}
+    numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns
+    
+    for col in numerical_cols:
+        Q1 = df[col].quantile(0.25)
+        Q3 = df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        # Find the outliers
+        outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)][col]
+        
+        if not outliers.empty:
+            outlier_report[col] = {
+                "count": len(outliers),
+                "percentage": f"{(len(outliers) / len(df) * 100):.2f}%",
+                "sample_values": outliers.head(5).tolist() # Show a sample of 5
+            }
+            
+    return outlier_report
+
+def create_bivariate_categorical_plot(df: pd.DataFrame, col1: str, col2: str) -> Figure:
+    # Defensive check: Limit cardinality to prevent messy plots
+    if df[col1].nunique() > 20 or df[col2].nunique() > 20:
+        print(f"Warning: '{col1}' or '{col2}' has too many unique values ({df[col1].nunique()}, {df[col2].nunique()}). Plot may be cluttered.")
+        pass
+        
+    fig = px.histogram(
+        df,
+        x=col1,
+        color=col2,
+        barmode='group', # Creates grouped bars instead of stacked
+        title=f"Interaction between '{col1}' and '{col2}'",
+        template="plotly_white"
+    )
+    fig.update_layout(title_x=0.5)
+    return fig
+
+
+def create_numerical_vs_categorical_plot(df: pd.DataFrame, num_col: str, cat_col: str) -> Figure:
+    # Defensive check: Limit cardinality of the categorical column
+    if df[cat_col].nunique() > 20:
+        print(f"Warning: '{cat_col}' has too many unique values ({df[cat_col].nunique()}). Plot may be cluttered.")
+        pass
+
+    fig = px.box(
+        df,
+        x=cat_col,
+        y=num_col,
+        color=cat_col, # Color by the categorical variable
+        title=f"Distribution of '{num_col}' across '{cat_col}' categories",
+        template="plotly_white"
+    )
+    fig.update_layout(title_x=0.5)
+    return fig
