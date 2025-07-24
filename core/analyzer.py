@@ -23,7 +23,7 @@ def analyze_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_analysis = []
 
     for col in df.columns:
-        dtype = df[col].dtype
+        dtype = str(df[col].dtype)
         missing_values = df[col].isnull().sum()
         total_rows = len(df)
         missing_percentage = (missing_values / total_rows)*100 if total_rows > 0 else 0
