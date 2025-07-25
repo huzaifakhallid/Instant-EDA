@@ -9,6 +9,12 @@ An advanced, interactive web application that automates the entire Exploratory D
 
 ---
 
+
+###  UPDATE: App is now deployed on streamlit
+
+🎉 **Test It Here** **[Instant-EDA](https://instant-eda-7vtzmrexjbygrqnlk2wqcx.streamlit.app/)**
+
+---
 ### ✨ Key Features
 
 This tool goes beyond basic EDA to provide deep, actionable insights:
