@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from core.report import generate_html_report
 from core.analyzer import (
     profile_data, 
     analyze_columns, 
@@ -7,13 +8,13 @@ from core.analyzer import (
     create_barplot,
     create_correlation_heatmap,
     get_health_report,
-    detect_outliers, 
+    detect_outliers,
     create_bivariate_categorical_plot,
     create_numerical_vs_categorical_plot,
     get_ml_suggestions
 )
 
-# --- Page Configuration ---
+# --- 1. Page Configuration ---
 st.set_page_config(
     page_title="InstantEDA",
     page_icon="👾",
@@ -21,139 +22,171 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- App Title and Description ---
-st.title("Instant EDA 👾")
-st.markdown("""
-    Welcome to InstantEDA! This advanced tool automates Exploratory Data Analysis. 
-    Just upload your CSV file below to generate a detailed interactive report.
-""")
+# --- 2. App Title and Description ---
+main_col1, main_col2 = st.columns([2, 1]) 
+with main_col1:
+    st.title("Instant EDA 👾")
+    st.markdown("""
+        Welcome to InstantEDA! This advanced tool automates Exploratory Data Analysis. 
+        Just upload your CSV file below to generate a detailed interactive report.
+    """)
 
-# --- Uploader ---
+# --- 3. File Uploader ---
 uploaded_file = st.file_uploader(
     "Upload a CSV file to begin analysis.",
     type=["csv"],
     label_visibility="collapsed" 
 )
 
-# --- Main App Logic ---
+def smart_datetime_converter(df: pd.DataFrame) -> pd.DataFrame:
+    """Intelligently convert object columns to datetime if they look like dates."""
+    for col in df.select_dtypes(include=['object']).columns:
+        # Take a sample of up to 50 non-null values
+        sample = df[col].dropna().sample(n=min(50, len(df[col].dropna())))
+        
+        # If the sample is empty, skip
+        if sample.empty:
+            continue
+            
+        # Try converting the sample
+        try:
+            converted_sample = pd.to_datetime(sample, errors='raise')
+            # If a high percentage of the sample are dates, convert the whole column
+            if (converted_sample.notna().sum() / len(sample)) > 0.8:
+                # Use errors='coerce' on the full column in case of a few bad entries
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        except (ValueError, TypeError):
+            # If the sample conversion fails, it's definitely not a datetime column
+            continue
+    return df
+
+# --- 4. Main Application Logic ---
 if uploaded_file is not None:
     try:
+        # --- Data Loading and Preprocessing ---
         df = pd.read_csv(uploaded_file)
-        # Attempt to convert object columns to datetime if possible
-        for col in df.select_dtypes(include=['object']).columns:
-            try:
-                df[col] = pd.to_datetime(df[col])
-            except (ValueError, TypeError):
-                continue # If conversion fails, just leave it as object
-                
-        st.success("File uploaded and processed successfully!")
+        df = smart_datetime_converter(df)
+
+
+        st.success("File processed successfully!")
         
-        # --- Pre-compute all analyses ---
+        # --- Pre-compute all tabular/text analyses ---
+        profile = profile_data(df)
+        column_summary = analyze_columns(df)
         health_report = get_health_report(df)
         outlier_report = detect_outliers(df)
         ml_suggestions = get_ml_suggestions(df)
-        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        # --- Pre-generate all plots ---
+        with st.spinner("Generating all visualizations..."):
+            correlation_fig = create_correlation_heatmap(df)
+            univariate_figs = {}
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    univariate_figs[col] = create_histogram(df, col)
+                else:
+                    univariate_figs[col] = create_barplot(df, col)
+
+        # Get column lists for UI selectors
+        categorical_cols = df.select_dtypes(include=['object', 'category', 'datetime64[ns]']).columns.tolist()
         numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
         
-        # --- Organize report into TABS ---
+        # --- 5. Download Button ---
+        with main_col2:
+            st.write("###  ") 
+            st.write("### Download Report")
+            
+            # Generate the HTML report 
+            report_html = generate_html_report(
+                profile,
+                column_summary,
+                health_report,
+                outlier_report,
+                univariate_figs,
+                correlation_fig,
+                ml_suggestions
+            )
+            st.download_button(
+                label="📥 Download Full HTML Report",
+                data=report_html,
+                file_name="InstantEDA_Full_Report.html",
+                mime="text/html"
+            )
+
+        # --- 6. Tabbed Interface ---
         tab1, tab2, tab3, tab4 = st.tabs(["📊 Data Overview", "📈 Variable Analysis", "🤖 ML Suggestions", "⚠️ Alerts & Outliers"])
         
-        # --- TAB 1: Data Overview ---
         with tab1:
             st.header("Data Preview")
             st.dataframe(df.head())
             st.markdown("---")
-            
             st.header("Data Profile")
-            profile = profile_data(df)
-            col1, col2, col3, col4 = st.columns(4)
-            with col1: st.metric("Number of Rows", profile["Number of Rows"])
-            with col2: st.metric("Number of Columns", profile["Number of Columns"])
-            with col3: st.metric("Missing Cells", profile["Total Missing Cells"])
-            with col4: st.metric("Duplicate Rows", profile["Total Duplicate Rows"])
+            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+            p_col1.metric("Number of Rows", profile["Number of Rows"])
+            p_col2.metric("Number of Columns", profile["Number of Columns"])
+            p_col3.metric("Missing Cells", profile["Total Missing Cells"])
+            p_col4.metric("Duplicate Rows", profile["Total Duplicate Rows"])
             st.markdown("---")
-
             st.header("Column-wise Analysis")
-            column_summary_df = analyze_columns(df)
-            st.dataframe(column_summary_df)
+            st.dataframe(column_summary)
 
-        # --- TAB 2: Variable Analysis ---
         with tab2:
             st.header("Univariate Analysis")
-            selected_column_uni = st.selectbox("Select a column for univariate analysis:", df.columns, key="univariate")
-            if selected_column_uni:
-                if pd.api.types.is_numeric_dtype(df[selected_column_uni]):
-                    fig = create_histogram(df, selected_column_uni)
-                else:
-                    fig = create_barplot(df, selected_column_uni)
-                st.plotly_chart(fig, use_container_width=True)
-
+            selected_col_uni = st.selectbox("Select a column:", df.columns, key="univariate")
+            if selected_col_uni:
+                st.plotly_chart(univariate_figs[selected_col_uni], use_container_width=True)
             st.markdown("---")
+            
             st.header("Bivariate Analysis")
-            
-            bivariate_type = st.radio("Choose a bivariate analysis type:", 
-                                      ("Numerical vs. Numerical", "Numerical vs. Categorical", "Categorical vs. Categorical"),
-                                      horizontal=True)
-            
-            if bivariate_type == "Numerical vs. Numerical":
+            bivariate_type = st.radio("Choose analysis type:", ("Numerical vs Numerical", "Numerical vs Categorical", "Categorical vs Categorical"), horizontal=True, key="biv_radio")
+            if bivariate_type == "Numerical vs Numerical":
                 st.subheader("Correlation Heatmap")
-                corr_fig = create_correlation_heatmap(df)
-                st.plotly_chart(corr_fig, use_container_width=True)
-            
-            elif bivariate_type == "Numerical vs. Categorical":
-                st.subheader("Numerical Distribution by Category")
-                col_num = st.selectbox("Select a numerical column:", numerical_cols, key="biv_num")
-                col_cat = st.selectbox("Select a categorical column:", categorical_cols, key="biv_cat_num")
-                if col_num and col_cat:
-                    fig = create_numerical_vs_categorical_plot(df, col_num, col_cat)
+                st.plotly_chart(correlation_fig, use_container_width=True)
+            elif bivariate_type == "Numerical vs Categorical":
+                c1, c2 = st.columns(2)
+                num_col = c1.selectbox("Select a numerical column:", numerical_cols, key="biv_num")
+                cat_col = c2.selectbox("Select a categorical column:", categorical_cols, key="biv_cat_num")
+                if num_col and cat_col:
+                    fig = create_numerical_vs_categorical_plot(df, num_col, cat_col)
                     st.plotly_chart(fig, use_container_width=True)
+            elif bivariate_type == "Categorical vs Categorical":
+                c1, c2 = st.columns(2)
+                cat_col1 = c1.selectbox("Select first categorical column:", categorical_cols, key="biv_cat1")
+                cat_col2 = c2.selectbox("Select second categorical column:", categorical_cols, key="biv_cat2", index=min(1, len(categorical_cols)-1))
+                if cat_col1 and cat_col2:
+                    if cat_col1 == cat_col2: st.warning("Please select two different columns.")
+                    else:
+                        fig = create_bivariate_categorical_plot(df, cat_col1, cat_col2)
+                        st.plotly_chart(fig, use_container_width=True)
 
-            elif bivariate_type == "Categorical vs. Categorical":
-                st.subheader("Interaction between two Categorical Variables")
-                col_cat1 = st.selectbox("Select the first categorical column:", categorical_cols, key="biv_cat1")
-                col_cat2 = st.selectbox("Select the second categorical column:", categorical_cols, key="biv_cat2")
-                if col_cat1 and col_cat2 and col_cat1 != col_cat2:
-                    fig = create_bivariate_categorical_plot(df, col_cat1, col_cat2)
-                    st.plotly_chart(fig, use_container_width=True)
-                elif col_cat1 == col_cat2:
-                    st.warning("Please select two different columns.")
-
-        # --- TAB 3: Machine Learning Suggestions ---
         with tab3:
             st.header("Machine Learning Preprocessing Suggestions")
-            st.info("These are heuristic-based suggestions for feature engineering. Always validate with domain knowledge.")
-            
+            st.info("These are heuristic-based suggestions. Always validate with domain knowledge.")
             for col_name, details in ml_suggestions.items():
-                with st.expander(f"**{col_name}** (Identified as: *{details['role']}*)"):
-                    st.markdown(f"**Suggestion:** {details['suggestion']}")
+                with st.expander(f"**{col_name}** (Identified as: *{details.get('role', 'Unknown')}*)"):
+                    st.markdown(f"**Suggestion:** {details.get('suggestion', 'N/A')}")
                     st.markdown("**Example Code:**")
-                    st.code(details['code'], language='python')
+                    st.code(details.get('code', '# N/A'), language='python')
         
-        # --- TAB 4: Alerts & Outliers ---
         with tab4:
             st.header("Data Health Report")
-            if not any(health_report.values()):
-                st.success("No major data health issues detected. Good job!")
-            if health_report["high_missing_values"]:
-                st.warning(f"**High Missing Values (>50%):** {', '.join(health_report['high_missing_values'])}")
-            if health_report["constant_columns"]:
-                st.warning(f"**Constant Columns:** {', '.join(health_report['constant_columns'])}")
-            if health_report["high_cardinality_columns"]:
-                st.info(f"**High Cardinality (Potential IDs):** {', '.join(health_report['high_cardinality_columns'])}")
-
+            if not any(v for k, v in health_report.items() if v): st.success("No major data health issues detected.")
+            else:
+                if health_report.get("high_missing_values"): st.warning(f"**High Missing Values (>50%):** {', '.join([f'{col} ({pct})' for col, pct in health_report['high_missing_values']])}")
+                if health_report.get("constant_columns"): st.warning(f"**Constant Columns:** {', '.join(health_report['constant_columns'])}")
+                if health_report.get("high_cardinality_columns"): st.info(f"**High Cardinality (Potential IDs):** {', '.join(health_report['high_cardinality_columns'])}")
             st.markdown("---")
             st.header("Outlier Report (IQR Method)")
-            if not outlier_report:
-                st.success("No significant outliers were detected based on the IQR method.")
+            if not outlier_report: st.success("No significant outliers were detected.")
             else:
                 for col_name, details in outlier_report.items():
                     with st.expander(f"**{col_name}** - Found {details['count']} outliers ({details['percentage']})"):
                         st.write(f"Sample Outlier Values: `{details['sample_values']}`")
-                        st.write("These values fall outside the 1.5 * IQR range and may warrant further investigation.")
+                        st.write("These values fall outside the 1.5 * IQR range and may warrant investigation.")
                         
     except Exception as e:
         st.error(f"An error occurred during processing: {e}")
-        st.exception(e) # This will print the full traceback for debugging
+        st.exception(e)
 
 else:
-    st.info("👆 Upload a CSV file to see the magic happen!")
+    st.info(" Upload a CSV file to see the magic happen!")
